@@ -13,6 +13,8 @@ local PANEL_COLOR = Color3.fromRGB(24, 28, 36)
 local PANEL_BORDER_COLOR = Color3.fromRGB(66, 74, 92)
 local TEXT_PRIMARY_COLOR = Color3.fromRGB(241, 245, 255)
 local TEXT_SECONDARY_COLOR = Color3.fromRGB(186, 196, 216)
+local STATUS_SUCCESS_COLOR = Color3.fromRGB(89, 255, 106)
+local STATUS_ERROR_COLOR = Color3.fromRGB(255, 120, 120)
 local INPUT_BG_COLOR = Color3.fromRGB(33, 38, 50)
 local INPUT_BORDER_COLOR = Color3.fromRGB(90, 103, 133)
 local INPUT_FOCUS_BG_COLOR = Color3.fromRGB(36, 42, 56)
@@ -68,15 +70,35 @@ listLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 listLayout.Padding = UDim.new(0, 10)
 listLayout.Parent = rootFrame
 
+local titleRow = Instance.new("Frame")
+titleRow.Size = UDim2.new(1, 0, 0, 38)
+titleRow.BackgroundTransparency = 1
+titleRow.Parent = rootFrame
+
 local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 24)
+title.Size = UDim2.new(0.62, 0, 1, 0)
 title.BackgroundTransparency = 1
 title.TextXAlignment = Enum.TextXAlignment.Left
+title.TextYAlignment = Enum.TextYAlignment.Center
 title.TextColor3 = TEXT_PRIMARY_COLOR
 title.Font = Enum.Font.GothamBlack
 title.TextSize = 18
 title.Text = "BulkAnim Publisher"
-title.Parent = rootFrame
+title.Parent = titleRow
+
+local headerStatusLabel = Instance.new("TextLabel")
+headerStatusLabel.Size = UDim2.new(0.38, 0, 1, 0)
+headerStatusLabel.Position = UDim2.fromScale(0.62, 0)
+headerStatusLabel.BackgroundTransparency = 1
+headerStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+headerStatusLabel.TextYAlignment = Enum.TextYAlignment.Center
+headerStatusLabel.TextWrapped = true
+headerStatusLabel.TextColor3 = TEXT_SECONDARY_COLOR
+headerStatusLabel.Font = Enum.Font.GothamBold
+headerStatusLabel.TextSize = 12
+headerStatusLabel.RichText = true
+headerStatusLabel.Text = ""
+headerStatusLabel.Parent = titleRow
 
 local instructions = Instance.new("TextLabel")
 instructions.Size = UDim2.new(1, 0, 0, 64)
@@ -174,6 +196,7 @@ statusLabel.TextWrapped = true
 statusLabel.TextColor3 = TEXT_SECONDARY_COLOR
 statusLabel.Font = Enum.Font.Gotham
 statusLabel.TextSize = 12
+statusLabel.RichText = true
 statusLabel.Text = "Idle"
 statusLabel.Parent = rootFrame
 
@@ -265,6 +288,7 @@ local openMainButtonCorner = Instance.new("UICorner")
 openMainButtonCorner.CornerRadius = UDim.new(0, 8)
 openMainButtonCorner.Parent = openMainButton
 local requirementsPageOpenToken = 0
+local setStatusText
 
 local function setRequirementsButtonEnabled(enabled, label)
 	openMainButton.Active = enabled
@@ -279,7 +303,7 @@ local function showRequirementsPage(reasonText)
 	requirementsPage.Visible = true
 	requirementsReason.Visible = reasonText ~= nil and reasonText ~= ""
 	requirementsReason.Text = reasonText or ""
-	statusLabel.Text = "Enable CreateAssetAsync Lua API to continue"
+	setStatusText("Enable CreateAssetAsync Lua API to continue", STATUS_ERROR_COLOR)
 
 	setRequirementsButtonEnabled(false, "Open Plugin (3)")
 	task.spawn(function()
@@ -325,6 +349,51 @@ local function trim(text)
 	return (text:gsub("^%s+", ""):gsub("%s+$", ""))
 end
 
+local function colorToHex(color)
+	local function channelToHex(channel)
+		return string.format("%02X", math.clamp(math.floor(channel * 255 + 0.5), 0, 255))
+	end
+
+	return "#" .. channelToHex(color.R) .. channelToHex(color.G) .. channelToHex(color.B)
+end
+
+local function escapeRichText(text)
+	return tostring(text or ""):gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;")
+end
+
+setStatusText = function(message, color)
+	statusLabel.Text = string.format('<font color="%s">%s</font>', colorToHex(color or TEXT_SECONDARY_COLOR), escapeRichText(message))
+end
+
+local function setUploadSummaryStatus(uploadedCount, errorCount, uploadedRigCount, totalRigCount)
+	local uploaded = tonumber(uploadedCount) or 0
+	local errors = tonumber(errorCount) or 0
+	local errorColor = errors == 0 and STATUS_SUCCESS_COLOR or STATUS_ERROR_COLOR
+	local uploadedRigs = tonumber(uploadedRigCount) or 0
+	local totalRigs = tonumber(totalRigCount) or 0
+
+	if totalRigs > 0 then
+		headerStatusLabel.Text = string.format(
+			'<font color="%s">UPLOADED: %d/%d Rigs</font>\n<font color="%s">%d errors</font>',
+			colorToHex(STATUS_SUCCESS_COLOR),
+			uploadedRigs,
+			totalRigs,
+			colorToHex(errorColor),
+			errors
+		)
+	else
+		headerStatusLabel.Text = ""
+	end
+
+	statusLabel.Text = string.format(
+		'<font color="%s">UPLOADED: %d</font>  <font color="%s">%d errors</font>',
+		colorToHex(STATUS_SUCCESS_COLOR),
+		uploaded,
+		colorToHex(errorColor),
+		errors
+	)
+end
+
 local function sortedKeys(dict)
 	local keys = {}
 	for key in pairs(dict) do
@@ -354,12 +423,17 @@ local function findAnimSource(rig)
 	return nil
 end
 
-local function setRunningState(isRunning, message)
+local function setRunningState(isRunning, message, messageColor)
 	runButton.Active = not isRunning
 	runButton.AutoButtonColor = not isRunning
 	runButton.BackgroundColor3 = isRunning and RUN_BUTTON_DISABLED_COLOR or ACCENT_COLOR
 	runButton.Text = isRunning and "Uploading..." or "Run Upload"
-	statusLabel.Text = message
+	if isRunning then
+		headerStatusLabel.Text = ""
+	end
+	if message ~= nil then
+		setStatusText(message, messageColor)
+	end
 end
 
 local function buildBackupString(successMap)
@@ -378,6 +452,8 @@ end
 local function runBatchUpload(uploadToGroupId)
 	local sessionResults = { success = {}, errors = {} }
 	local apiDisabledDetected = false
+	local totalSelectedRigs = 0
+	local rigsWithSuccess = {}
 
 	print("\n[Auto-Uploader] Starting Batch Process...")
 	local selected = Selection:Get()
@@ -391,6 +467,8 @@ local function runBatchUpload(uploadToGroupId)
 			warn(string.format("[Skip] %s is not a Model.", rig:GetFullName()))
 			continue
 		end
+
+		totalSelectedRigs += 1
 
 		local animalName = rig.Name
 		local sequences = findAnimSource(rig)
@@ -424,6 +502,7 @@ local function runBatchUpload(uploadToGroupId)
 			if callSuccess and resultOrError == Enum.CreateAssetResult.Success and assetId then
 				local finalId = "rbxassetid://" .. tostring(assetId)
 				sessionResults.success[animalName][obj.Name] = finalId
+				rigsWithSuccess[animalName] = true
 				print(string.format(" [+] Uploaded: %s -> %s (%s)", animalName, obj.Name, tostring(assetId)))
 			else
 				local errMessage
@@ -495,7 +574,17 @@ local function runBatchUpload(uploadToGroupId)
 		end
 	end
 
-	return true, string.format("Uploaded %d animation(s), %d error(s)", uploadedCount, #sessionResults.errors), apiDisabledDetected
+	local uploadedRigCount = 0
+	for _ in pairs(rigsWithSuccess) do
+		uploadedRigCount += 1
+	end
+
+	return true, string.format("Uploaded %d animation(s), %d error(s)", uploadedCount, #sessionResults.errors), apiDisabledDetected, {
+		uploadedCount = uploadedCount,
+		errorCount = #sessionResults.errors,
+		uploadedRigCount = uploadedRigCount,
+		totalRigCount = totalSelectedRigs,
+	}
 end
 
 local savedGroupId = plugin:GetSetting(SETTINGS_GROUP_ID_KEY)
@@ -539,28 +628,42 @@ runButton.MouseButton1Click:Connect(function()
 	if rawText ~= "" then
 		uploadToGroupId = tonumber(rawText)
 		if not uploadToGroupId then
-			statusLabel.Text = "Group ID must be a number, or blank for personal upload"
+			setStatusText("Group ID must be a number, or blank for personal upload", STATUS_ERROR_COLOR)
 			warn("[Auto-Uploader] Invalid Group ID. Enter a numeric ID or leave blank.")
 			return
 		end
 	end
 
 	plugin:SetSetting(SETTINGS_GROUP_ID_KEY, rawText)
-	setRunningState(true, "Running...")
+	setRunningState(true, "Running...", TEXT_SECONDARY_COLOR)
 
-	local ok, success, message, apiDisabledDetected = pcall(function()
+	local ok, success, message, apiDisabledDetected, summary = pcall(function()
 		return runBatchUpload(uploadToGroupId)
 	end)
 
 	if ok and success then
-		setRunningState(false, message)
+		setRunningState(false, nil)
+
+		if typeof(summary) == "table" then
+			setUploadSummaryStatus(summary.uploadedCount, summary.errorCount, summary.uploadedRigCount, summary.totalRigCount)
+		else
+			local uploadedCount, errorCount = string.match(message, "Uploaded (%d+) animation%(s%), (%d+) error%(s%)")
+			if uploadedCount and errorCount then
+				setUploadSummaryStatus(uploadedCount, errorCount)
+			else
+				setStatusText(message, STATUS_SUCCESS_COLOR)
+			end
+		end
+
 		if apiDisabledDetected then
 			showRequirementsPage("Upload failed because CreateAssetAsync Lua API appears to be disabled.")
 		end
 	elseif ok then
-		setRunningState(false, message)
+		headerStatusLabel.Text = ""
+		setRunningState(false, message, STATUS_ERROR_COLOR)
 	else
-		setRunningState(false, "Failed. Check Output for details.")
+		headerStatusLabel.Text = ""
+		setRunningState(false, "Failed. Check Output for details.", STATUS_ERROR_COLOR)
 		warn("[Auto-Uploader] Batch run failed: " .. tostring(message))
 		if isCreateAssetApiDisabledError(message) then
 			showRequirementsPage("Upload failed because CreateAssetAsync Lua API appears to be disabled.")
