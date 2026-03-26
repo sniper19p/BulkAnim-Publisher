@@ -5,7 +5,7 @@ local ServerStorage = game:GetService("ServerStorage")
 local TOOLBAR_NAME = "Animation Tools"
 local BUTTON_NAME = "BulkAnim Publisher"
 local BUTTON_TOOLTIP = "Upload selected rig animations and organize them in ServerStorage"
-local BUTTON_ICON = "rbxassetid://110061709835310"
+local BUTTON_ICON = "rbxassetid://109714803599973"
 local WIDGET_ID = "AutoAnimationUploaderWidget"
 local SETTINGS_GROUP_ID_KEY = "AutoAnimationUploader_GroupId"
 local SETTINGS_REQUIREMENTS_SEEN_KEY = "AutoAnimationUploader_RequirementsSeen"
@@ -31,7 +31,7 @@ local widgetInfo = DockWidgetPluginGuiInfo.new(
 	false,
 	false,
 	420,
-	300,
+	460,
 	320,
 	260
 )
@@ -109,7 +109,7 @@ instructions.TextYAlignment = Enum.TextYAlignment.Top
 instructions.TextColor3 = TEXT_SECONDARY_COLOR
 instructions.Font = Enum.Font.Gotham
 instructions.TextSize = 13
-instructions.Text = "How to use:\n1) Select one or more rig models\n2) Optional: enter Group ID\n3) Click Run Upload"
+instructions.Text = "How to use:\n1) Select one or more rig models\n2) Click Scan Selection to review animations\n3) Optional: edit names / uncheck to skip\n4) Optional: enter Group ID\n5) Click Run Upload"
 instructions.Parent = rootFrame
 
 local sourceHint = Instance.new("TextLabel")
@@ -172,6 +172,78 @@ groupHelp.Font = Enum.Font.Gotham
 groupHelp.TextSize = 11
 groupHelp.Text = "Only numbers are valid. Leave empty to upload to your own account."
 groupHelp.Parent = rootFrame
+
+local animHeaderRow = Instance.new("Frame")
+animHeaderRow.Size = UDim2.new(1, 0, 0, 24)
+animHeaderRow.BackgroundTransparency = 1
+animHeaderRow.Parent = rootFrame
+
+local animHeaderLabel = Instance.new("TextLabel")
+animHeaderLabel.Size = UDim2.new(0.62, 0, 1, 0)
+animHeaderLabel.BackgroundTransparency = 1
+animHeaderLabel.TextXAlignment = Enum.TextXAlignment.Left
+animHeaderLabel.TextColor3 = TEXT_PRIMARY_COLOR
+animHeaderLabel.Font = Enum.Font.GothamSemibold
+animHeaderLabel.TextSize = 13
+animHeaderLabel.Text = "Animations to Upload"
+animHeaderLabel.Parent = animHeaderRow
+
+local scanButton = Instance.new("TextButton")
+scanButton.Size = UDim2.new(0.38, 0, 1, 0)
+scanButton.Position = UDim2.fromScale(0.62, 0)
+scanButton.BackgroundColor3 = ACCENT_COLOR
+scanButton.BorderSizePixel = 0
+scanButton.TextColor3 = Color3.fromRGB(13, 20, 31)
+scanButton.Font = Enum.Font.GothamBold
+scanButton.TextSize = 12
+scanButton.Text = "Scan Selection"
+scanButton.Parent = animHeaderRow
+
+local scanButtonCorner = Instance.new("UICorner")
+scanButtonCorner.CornerRadius = UDim.new(0, 6)
+scanButtonCorner.Parent = scanButton
+
+local animCountLabel = Instance.new("TextLabel")
+animCountLabel.Size = UDim2.new(1, 0, 0, 16)
+animCountLabel.BackgroundTransparency = 1
+animCountLabel.TextXAlignment = Enum.TextXAlignment.Left
+animCountLabel.TextColor3 = TEXT_SECONDARY_COLOR
+animCountLabel.Font = Enum.Font.Gotham
+animCountLabel.TextSize = 11
+animCountLabel.Text = "0 animations"
+animCountLabel.Parent = rootFrame
+
+local animList = Instance.new("ScrollingFrame")
+animList.Size = UDim2.new(1, 0, 0, 160)
+animList.BackgroundColor3 = Color3.fromRGB(20, 24, 32)
+animList.BorderSizePixel = 0
+animList.ScrollBarThickness = 6
+animList.CanvasSize = UDim2.new(0, 0, 0, 0)
+animList.Parent = rootFrame
+
+local animListCorner = Instance.new("UICorner")
+animListCorner.CornerRadius = UDim.new(0, 8)
+animListCorner.Parent = animList
+
+local animListStroke = Instance.new("UIStroke")
+animListStroke.Color = PANEL_BORDER_COLOR
+animListStroke.Thickness = 1
+animListStroke.Transparency = 0.4
+animListStroke.Parent = animList
+
+local animListPadding = Instance.new("UIPadding")
+animListPadding.PaddingTop = UDim.new(0, 8)
+animListPadding.PaddingBottom = UDim.new(0, 8)
+animListPadding.PaddingLeft = UDim.new(0, 8)
+animListPadding.PaddingRight = UDim.new(0, 8)
+animListPadding.Parent = animList
+
+local animListLayout = Instance.new("UIListLayout")
+animListLayout.FillDirection = Enum.FillDirection.Vertical
+animListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+animListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+animListLayout.Padding = UDim.new(0, 6)
+animListLayout.Parent = animList
 
 local runButton = Instance.new("TextButton")
 runButton.Size = UDim2.new(1, 0, 0, 34)
@@ -289,6 +361,8 @@ openMainButtonCorner.CornerRadius = UDim.new(0, 8)
 openMainButtonCorner.Parent = openMainButton
 local requirementsPageOpenToken = 0
 local setStatusText
+local scannedItems = {}
+local scannedRigCount = 0
 
 local function setRequirementsButtonEnabled(enabled, label)
 	openMainButton.Active = enabled
@@ -423,6 +497,162 @@ local function findAnimSource(rig)
 	return nil
 end
 
+local function updateAnimListCanvas()
+	animList.CanvasSize = UDim2.new(0, 0, 0, animListLayout.AbsoluteContentSize.Y + 8)
+end
+
+animListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(updateAnimListCanvas)
+
+local function clearAnimationList()
+	for _, item in ipairs(scannedItems) do
+		if item.row then
+			item.row:Destroy()
+		end
+	end
+	scannedItems = {}
+	scannedRigCount = 0
+	animCountLabel.Text = "0 animations"
+	updateAnimListCanvas()
+end
+
+local function setRowEnabled(item, enabled)
+	item.enabled = enabled
+	item.checkButton.Text = enabled and "✓" or ""
+	item.row.BackgroundColor3 = enabled and INPUT_BG_COLOR or Color3.fromRGB(28, 32, 42)
+	item.nameBox.TextTransparency = enabled and 0 or 0.35
+	item.nameBox.TextEditable = enabled
+end
+
+local function createAnimationRow(rigName, sequence, defaultName)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(1, 0, 0, 34)
+	row.BackgroundColor3 = INPUT_BG_COLOR
+	row.BorderSizePixel = 0
+	row.Parent = animList
+
+	local rowCorner = Instance.new("UICorner")
+	rowCorner.CornerRadius = UDim.new(0, 6)
+	rowCorner.Parent = row
+
+	local rowStroke = Instance.new("UIStroke")
+	rowStroke.Color = INPUT_BORDER_COLOR
+	rowStroke.Thickness = 1
+	rowStroke.Transparency = 0.3
+	rowStroke.Parent = row
+
+	local checkButton = Instance.new("TextButton")
+	checkButton.Size = UDim2.new(0, 22, 0, 22)
+	checkButton.Position = UDim2.new(0, 6, 0.5, -11)
+	checkButton.BackgroundColor3 = Color3.fromRGB(16, 20, 28)
+	checkButton.BorderSizePixel = 0
+	checkButton.TextColor3 = TEXT_PRIMARY_COLOR
+	checkButton.Font = Enum.Font.GothamBold
+	checkButton.TextSize = 14
+	checkButton.Text = "✓"
+	checkButton.Parent = row
+
+	local checkCorner = Instance.new("UICorner")
+	checkCorner.CornerRadius = UDim.new(0, 4)
+	checkCorner.Parent = checkButton
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(0.42, -38, 1, 0)
+	label.Position = UDim2.new(0, 34, 0, 0)
+	label.BackgroundTransparency = 1
+	label.TextXAlignment = Enum.TextXAlignment.Left
+	label.TextColor3 = TEXT_SECONDARY_COLOR
+	label.Font = Enum.Font.Gotham
+	label.TextSize = 11
+	label.TextTruncate = Enum.TextTruncate.AtEnd
+	label.Text = string.format("%s / %s", rigName, sequence.Name)
+	label.Parent = row
+
+	local nameBox = Instance.new("TextBox")
+	nameBox.Size = UDim2.new(0.58, -16, 0, 24)
+	nameBox.Position = UDim2.new(0.42, -4, 0.5, -12)
+	nameBox.BackgroundColor3 = INPUT_FOCUS_BG_COLOR
+	nameBox.BorderSizePixel = 0
+	nameBox.TextColor3 = TEXT_PRIMARY_COLOR
+	nameBox.Font = Enum.Font.Gotham
+	nameBox.TextSize = 12
+	nameBox.TextXAlignment = Enum.TextXAlignment.Left
+	nameBox.ClearTextOnFocus = false
+	nameBox.Text = defaultName
+	nameBox.Parent = row
+
+	local namePadding = Instance.new("UIPadding")
+	namePadding.PaddingLeft = UDim.new(0, 8)
+	namePadding.PaddingRight = UDim.new(0, 8)
+	namePadding.Parent = nameBox
+
+	local nameCorner = Instance.new("UICorner")
+	nameCorner.CornerRadius = UDim.new(0, 5)
+	nameCorner.Parent = nameBox
+
+	local item = {
+		rigName = rigName,
+		sequence = sequence,
+		defaultName = defaultName,
+		row = row,
+		checkButton = checkButton,
+		nameBox = nameBox,
+		enabled = true,
+	}
+
+	checkButton.MouseButton1Click:Connect(function()
+		setRowEnabled(item, not item.enabled)
+	end)
+
+	return item
+end
+
+local function scanSelection()
+	clearAnimationList()
+	local selected = Selection:Get()
+	if #selected == 0 then
+		setStatusText("No rigs selected. Select models then scan.", STATUS_ERROR_COLOR)
+		return false
+	end
+
+	local animCount = 0
+	local rigCount = 0
+
+	for _, rig in ipairs(selected) do
+		if not rig:IsA("Model") then
+			warn(string.format("[Skip] %s is not a Model.", rig:GetFullName()))
+			continue
+		end
+
+		rigCount += 1
+		local sequences = findAnimSource(rig)
+		if not sequences then
+			warn("[Skip] No animations found for: " .. rig.Name)
+			continue
+		end
+
+		for _, obj in ipairs(sequences) do
+			if obj:IsA("KeyframeSequence") then
+				animCount += 1
+				local defaultName = rig.Name .. " " .. obj.Name
+				local item = createAnimationRow(rig.Name, obj, defaultName)
+				table.insert(scannedItems, item)
+			end
+		end
+	end
+
+	scannedRigCount = rigCount
+	animCountLabel.Text = string.format("%d animation(s) from %d rig(s)", animCount, rigCount)
+	updateAnimListCanvas()
+
+	if animCount == 0 then
+		setStatusText("No animations found in selected rigs.", STATUS_ERROR_COLOR)
+		return false
+	end
+
+	setStatusText("Scan complete. Review names and selections.", STATUS_SUCCESS_COLOR)
+	return true
+end
+
 local function setRunningState(isRunning, message, messageColor)
 	runButton.Active = not isRunning
 	runButton.AutoButtonColor = not isRunning
@@ -452,77 +682,80 @@ end
 local function runBatchUpload(uploadToGroupId)
 	local sessionResults = { success = {}, errors = {} }
 	local apiDisabledDetected = false
-	local totalSelectedRigs = 0
+	local totalSelectedRigs = scannedRigCount
 	local rigsWithSuccess = {}
+	local anySelected = false
 
-	print("\n[Auto-Uploader] Starting Batch Process...")
-	local selected = Selection:Get()
-	if #selected == 0 then
-		warn("[Auto-Uploader] No rigs selected. Please select models in the workspace.")
-		return false, "No rigs selected", false
+	if #scannedItems == 0 then
+		warn("[Auto-Uploader] No animations scanned. Click Scan Selection first.")
+		return false, "No animations scanned. Click Scan Selection first.", false
 	end
 
-	for _, rig in ipairs(selected) do
-		if not rig:IsA("Model") then
-			warn(string.format("[Skip] %s is not a Model.", rig:GetFullName()))
+	for _, item in ipairs(scannedItems) do
+		if item.enabled then
+			anySelected = true
+			break
+		end
+	end
+
+	if not anySelected then
+		warn("[Auto-Uploader] No animations selected.")
+		return false, "No animations selected.", false
+	end
+
+	print("\n[Auto-Uploader] Starting Batch Process...")
+	for _, item in ipairs(scannedItems) do
+		if not item.enabled then
 			continue
 		end
 
-		totalSelectedRigs += 1
-
-		local animalName = rig.Name
-		local sequences = findAnimSource(rig)
-
-		if not sequences then
-			warn("[Skip] No animations found for: " .. animalName)
-			continue
+		local animalName = item.rigName
+		local sequence = item.sequence
+		local desiredName = trim(item.nameBox.Text)
+		if desiredName == "" then
+			desiredName = item.defaultName
+			item.nameBox.Text = desiredName
 		end
 
 		sessionResults.success[animalName] = sessionResults.success[animalName] or {}
 
-		for _, obj in ipairs(sequences) do
-			if not obj:IsA("KeyframeSequence") then
-				continue
-			end
+		local params = {
+			Name = desiredName,
+			Description = "Auto-uploaded Animation",
+			CreatorType = uploadToGroupId and Enum.AssetCreatorType.Group or Enum.AssetCreatorType.User,
+		}
 
-			local params = {
-				Name = animalName .. " " .. obj.Name,
-				Description = "Auto-uploaded Animation",
-				CreatorType = uploadToGroupId and Enum.AssetCreatorType.Group or Enum.AssetCreatorType.User,
-			}
+		if uploadToGroupId then
+			params.CreatorId = uploadToGroupId
+		end
 
-			if uploadToGroupId then
-				params.CreatorId = uploadToGroupId
-			end
+		local callSuccess, resultOrError, assetId = pcall(function()
+			return AssetService:CreateAssetAsync(sequence, Enum.AssetType.Animation, params)
+		end)
 
-			local callSuccess, resultOrError, assetId = pcall(function()
-				return AssetService:CreateAssetAsync(obj, Enum.AssetType.Animation, params)
-			end)
-
-			if callSuccess and resultOrError == Enum.CreateAssetResult.Success and assetId then
-				local finalId = "rbxassetid://" .. tostring(assetId)
-				sessionResults.success[animalName][obj.Name] = finalId
-				rigsWithSuccess[animalName] = true
-				print(string.format(" [+] Uploaded: %s -> %s (%s)", animalName, obj.Name, tostring(assetId)))
+		if callSuccess and resultOrError == Enum.CreateAssetResult.Success and assetId then
+			local finalId = "rbxassetid://" .. tostring(assetId)
+			sessionResults.success[animalName][desiredName] = finalId
+			rigsWithSuccess[animalName] = true
+			print(string.format(" [+] Uploaded: %s -> %s (%s)", animalName, desiredName, tostring(assetId)))
+		else
+			local errMessage
+			if callSuccess then
+				errMessage = string.format("CreateAssetAsync result: %s", tostring(resultOrError))
 			else
-				local errMessage
-				if callSuccess then
-					errMessage = string.format("CreateAssetAsync result: %s", tostring(resultOrError))
-				else
-					errMessage = tostring(resultOrError)
-				end
-
-				if isCreateAssetApiDisabledError(errMessage) then
-					apiDisabledDetected = true
-				end
-
-				table.insert(sessionResults.errors, {
-					animal = animalName,
-					anim = obj.Name,
-					err = errMessage,
-				})
-				warn(string.format(" [!] FAILED: %s -> %s | %s", animalName, obj.Name, errMessage))
+				errMessage = tostring(resultOrError)
 			end
+
+			if isCreateAssetApiDisabledError(errMessage) then
+				apiDisabledDetected = true
+			end
+
+			table.insert(sessionResults.errors, {
+				animal = animalName,
+				anim = desiredName,
+				err = errMessage,
+			})
+			warn(string.format(" [!] FAILED: %s -> %s | %s", animalName, desiredName, errMessage))
 		end
 	end
 
@@ -669,6 +902,10 @@ runButton.MouseButton1Click:Connect(function()
 			showRequirementsPage("Upload failed because CreateAssetAsync Lua API appears to be disabled.")
 		end
 	end
+end)
+
+scanButton.MouseButton1Click:Connect(function()
+	scanSelection()
 end)
 
 plugin.Unloading:Connect(function()
